@@ -123,7 +123,9 @@ allocproc(void)
 
 found:
   p->pid = allocpid();
-  p->priority = 0;
+  p->priority = 0;   // new process starts at highest queue
+  p->qticks = 0;     // no CPU time consumed yet
+  p->waitticks = 0;  // not waiting yet
   p->state = USED;
 
   // Allocate a trapframe page.
@@ -415,6 +417,36 @@ kwait(uint64 addr)
   }
 }
 
+// My additions
+
+static int
+mlfq_quantum(int prio)
+{
+  // Time slice per priority level (in timer ticks).
+  // 0:4, 1:8, 2:16, 3:32
+  static int q[4] = {4, 8, 16, 32};
+  if(prio < 0) prio = 0;
+  if(prio > 3) prio = 3;
+  return q[prio];
+}
+
+static int
+mlfq_exists_higher_runnable(int cur_prio)
+{
+  // If there is any RUNNABLE process in a higher-priority queue (smaller number),
+  // the current process should be preempted.
+  struct proc *p;
+  for(p = proc; p < &proc[NPROC]; p++){
+    acquire(&p->lock);
+    int ok = (p->state == RUNNABLE && p->priority < cur_prio);
+    release(&p->lock);
+    if(ok)
+      return 1;
+  }
+  return 0;
+}
+
+
 // Per-CPU process scheduler.
 // Each CPU calls scheduler() after setting itself up.
 // Scheduler never returns.  It loops, doing:
@@ -425,42 +457,129 @@ kwait(uint64 addr)
 void
 scheduler(void)
 {
-  struct proc *p;
   struct cpu *c = mycpu();
-
   c->proc = 0;
+
+  // Round-robin cursor per priority level.
+  static int rr[4] = {0, 0, 0, 0};
+
   for(;;){
-    // The most recent process to run may have had interrupts
-    // turned off; enable them to avoid a deadlock if all
-    // processes are waiting. Then turn them back off
-    // to avoid a possible race between an interrupt
-    // and wfi.
     intr_on();
     intr_off();
 
-    int found = 0;
-    for(p = proc; p < &proc[NPROC]; p++) {
-      acquire(&p->lock);
-      if(p->state == RUNNABLE) {
-        // Switch to chosen process.  It is the process's job
-        // to release its lock and then reacquire it
-        // before jumping back to us.
-        p->state = RUNNING;
-        c->proc = p;
-        swtch(&c->context, &p->context);
+    int ran = 0;
 
-        // Process is done running for now.
-        // It should have changed its p->state before coming back.
-        c->proc = 0;
-        found = 1;
+    // Always try higher priority queues first: 0 -> 3
+    for(int lvl = 0; lvl < 4 && ran == 0; lvl++){
+      // Start scanning from rr[lvl] to implement round-robin within the level.
+      for(int k = 0; k < NPROC; k++){
+        int i = (rr[lvl] + k) % NPROC;
+        struct proc *p = &proc[i];
+
+        acquire(&p->lock);
+        if(p->state == RUNNABLE && p->priority == lvl){
+          // Run this process.
+          p->state = RUNNING;
+          c->proc = p;
+
+          // Update RR cursor so next time we start after this index.
+          rr[lvl] = (i + 1) % NPROC;
+
+          swtch(&c->context, &p->context);
+
+          // Back from process.
+          c->proc = 0;
+          ran = 1;
+        }
+        release(&p->lock);
+
+        if(ran)
+          break;
       }
-      release(&p->lock);
     }
-    if(found == 0) {
-      // nothing to run; stop running on this core until an interrupt.
+
+    if(ran == 0){
+      // Nothing runnable: sleep the CPU until an interrupt arrives.
       asm volatile("wfi");
     }
   }
+}
+
+int
+mlfq_tick(void)
+{
+  // Called on each timer tick.
+  // Returns 1 if the currently running process should yield the CPU.
+  struct proc *cur = myproc();
+
+  // 1) Starvation prevention:
+  // Increase waitticks for RUNNABLE processes and promote if they waited too long.
+  for(struct proc *p = proc; p < &proc[NPROC]; p++){
+    acquire(&p->lock);
+
+    if(p->state == RUNNABLE){
+      p->waitticks++;
+
+      int limit = 10 * mlfq_quantum(p->priority);
+      if(p->priority > 0 && p->waitticks >= limit){
+        // Boost priority by one level (towards 0).
+        p->priority--;
+        p->waitticks = 0;
+
+        // When changing level, reset quantum progress.
+        p->qticks = 0;
+      }
+    }
+
+    release(&p->lock);
+  }
+
+  // No running process? nothing to preempt.
+  if(cur == 0)
+    return 0;
+
+  // 2) Update accounting for the currently running process.
+  int cur_prio;
+  int need_demote = 0;
+
+  acquire(&cur->lock);
+
+  // If cur is not RUNNING (rare race), don't touch.
+  if(cur->state != RUNNING){
+    release(&cur->lock);
+    return 0;
+  }
+
+  // Running process is not waiting.
+  cur->waitticks = 0;
+
+  // Rule: each timer tick counts as a full tick of CPU usage.
+  cur->qticks++;
+
+  cur_prio = cur->priority;
+
+  int q = mlfq_quantum(cur_prio);
+  if(cur->qticks >= q && cur_prio < 3){
+    // Time slice finished at this level -> demote to next (lower) queue.
+    cur->priority++;
+    cur->qticks = 0;
+    need_demote = 1;
+    cur_prio = cur->priority;
+  }
+
+  release(&cur->lock);
+
+  // 3) Preempt if either:
+  // - quantum expired (demotion happened), OR
+  // - a higher-priority RUNNABLE process exists.
+  if(need_demote)
+    return 1;
+
+  if(mlfq_exists_higher_runnable(cur_prio))
+    return 1;
+
+  // Otherwise, keep running (do NOT yield on every tick).
+  return 0;
 }
 
 // Switch to scheduler.  Must hold only p->lock

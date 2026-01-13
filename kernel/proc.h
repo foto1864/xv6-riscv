@@ -105,9 +105,15 @@ struct proc {
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
 
-  int priority; // Metadata
+  // My additions:
+
+  int priority;      // MLFQ level: 0 (highest) .. 3 (lowest)
+  int qticks;        // ticks consumed in current level (quantum progress)
+  int waitticks;     // how long the process has been RUNNABLE without running
 
 };
+
+int mlfq_tick(void);
 
 extern struct proc proc[NPROC];
 

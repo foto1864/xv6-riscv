@@ -81,9 +81,11 @@ usertrap(void)
     kexit(-1);
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
-    yield();
-
+  if(which_dev == 2){
+    // MLFQ: only yield when quantum expires or a higher-priority process is ready.
+    if(mlfq_tick())
+      yield();
+  }
   prepare_return();
 
   // the user page table to switch to, for trampoline.S
