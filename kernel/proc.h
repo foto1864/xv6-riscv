@@ -104,4 +104,21 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+
+  int priority; // Metadata
+
+};
+
+extern struct proc proc[NPROC];
+
+#define NPROC 64
+
+struct pstat {
+  int pid[NPROC];
+  int ppid[NPROC];
+  int state[NPROC];
+  int priority[NPROC];
+  uint64 sz[NPROC];
+  char name[NPROC][16];
+  int used[NPROC];
 };

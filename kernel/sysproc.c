@@ -107,3 +107,36 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+uint64
+sys_getpinfo(void)
+{
+  uint64 uaddr;
+  struct pstat ps;
+  struct proc *p;
+
+  argaddr(0, &uaddr);
+
+  memset(&ps, 0, sizeof(ps));
+
+  for (int i = 0; i < NPROC; i++) {
+    p = &proc[i];
+    acquire(&p->lock);
+    if (p->state != UNUSED) {
+      ps.used[i] = 1;
+      ps.pid[i] = p->pid;
+      ps.ppid[i] = p->parent ? p->parent->pid : 0;
+      ps.state[i] = p->state;
+      ps.priority[i] = p->priority;
+      ps.sz[i] = p->sz;
+      safestrcpy(ps.name[i], p->name, sizeof(ps.name[i]));
+    }
+    release(&p->lock);
+  }
+
+  if (copyout(myproc()->pagetable, uaddr, (char *)&ps, sizeof(ps)) < 0)
+    return -1;
+
+  return 0;
+}
+
