@@ -108,20 +108,36 @@ sys_uptime(void)
   return xticks;
 }
 
+// Implementation of our new syscall:
+// 1. We create a struct in kernel space
+// 2. We fetch the user address from the syscall
+// 3. We initialize the kernel buffer
+// 4. We copy the info of the processes into the buffer inside a mutex
+// 5. We copy the buffer from kernel memory to user space
+// Return 0 on success and -1 on fail
 uint64
 sys_getpinfo(void)
 {
-  uint64 uaddr;
+
+  // Create a struct pstat in kernel stack to copy info of running processes
+  // This is the kernel-side buffer, we build it here and then we copy it to user space
   struct pstat ps;
   struct proc *p;
 
+  // THis is the user virtual address where we will copy the pstat buffer at the end
+  uint64 uaddr;
+
+  // We fetch the first syscall argument as a user address (this is a pointer to user space)
   argaddr(0, &uaddr);
 
+  // Initialize data of the struct pstat (without memset the struct may contain kernel garbage)
   memset(&ps, 0, sizeof(ps));
 
   for (int i = 0; i < NPROC; i++) {
     p = &proc[i];
+    // mutex wait
     acquire(&p->lock);
+    // actual copy of the data only for processes that are not marked as "UNUSED"
     if (p->state != UNUSED) {
       ps.used[i] = 1;
       ps.pid[i] = p->pid;
@@ -131,9 +147,11 @@ sys_getpinfo(void)
       ps.sz[i] = p->sz;
       safestrcpy(ps.name[i], p->name, sizeof(ps.name[i]));
     }
+    // mutex post
     release(&p->lock);
   }
 
+  // Copy the struct pstat buffer from kernel memory to the address provided by the user
   if (copyout(myproc()->pagetable, uaddr, (char *)&ps, sizeof(ps)) < 0)
     return -1;
 

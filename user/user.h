@@ -25,7 +25,7 @@ int getpid(void);
 char* sys_sbrk(int,int);
 int pause(int);
 int uptime(void);
-int getpinfo(struct pstat *);
+int getpinfo(struct pstat *); // Add prototype of our new function
 
 // ulib.c
 int stat(const char*, struct stat*);

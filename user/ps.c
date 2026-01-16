@@ -3,6 +3,13 @@
 #include "user/user.h"
 #include "kernel/param.h"
 
+#define stderr 2
+
+// This is a simple program that essentially calls the new "getpinfo" syscall
+// It fetches the information of the current running processes and prints them to the screen
+
+// Note: In order for the program "ps" to be runnable we add it to the Makefile with $U/_ps\ before the build
+ 
 struct pstat {
   int pid[NPROC];
   int ppid[NPROC];
@@ -13,9 +20,7 @@ struct pstat {
   int used[NPROC];
 };
 
-static char*
-stname(int s)
-{
+static char* state_name(int s) {
   switch(s){
   case 0: return "UNUSED";
   case 1: return "USED";
@@ -27,13 +32,11 @@ stname(int s)
   }
 }
 
-int
-main(int argc, char *argv[])
-{
+int main(int argc, char *argv[]) {
   struct pstat ps;
 
   if(getpinfo(&ps) < 0){
-    fprintf(2, "ps: getpinfo failed\n");
+    fprintf(stderr, "ps: getpinfo failed\n");
     exit(1);
   }
 
@@ -44,7 +47,7 @@ main(int argc, char *argv[])
              ps.pid[i],
              ps.ppid[i],
              ps.priority[i],
-             stname(ps.state[i]),
+             state_name(ps.state[i]),
              (long)ps.sz[i],
              ps.name[i]);
     }

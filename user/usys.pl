@@ -42,4 +42,4 @@ entry("getpid");
 entry("sbrk");
 entry("pause");
 entry("uptime");
-entry("getpinfo");
+entry("getpinfo"); # new entry for our new syscall

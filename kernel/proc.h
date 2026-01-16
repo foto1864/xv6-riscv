@@ -112,13 +112,21 @@ struct proc {
   int waitticks;     // how long the process has been RUNNABLE without running
 
 };
-
+// This function is called on each timer interrupt
+// It updates MLFQ info (qticks and waitticks) and sets the priority of the
+// processes accoding to the instructions (demotion, aging, boosting).
+// It returns non-zero if the CPU should yield or reschedule.
 int mlfq_tick(void);
+
+// We define that the max processes is essentially NPROC, since in xv6 we are not making any 
+// manual memory allocations so if this limit is surpassed and we need to have more than NPROC
+// processes the new "fork" syscall will fail to execute. 
+#define NPROC 64
 
 extern struct proc proc[NPROC];
 
-#define NPROC 64
-
+// In this struct we keep the information requested in the project's instructions.
+// This is the struct that is going to be filled by our new system call "getpinfo"
 struct pstat {
   int pid[NPROC];
   int ppid[NPROC];
